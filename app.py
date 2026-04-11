@@ -49,25 +49,9 @@ def format_size(size):
         return f"{round(size / (1024*1024), 2)} MB"
     return "Unknown"
 
-# ---------- COMMON YT-DLP OPTIONS ----------
-def base_ydl_opts():
-    return {
-        'quiet': True,
-        'noplaylist': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android']
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0',
-        }
-    }
-
 # ---------- FETCH FORMATS ----------
 def get_video_formats(url):
-    ydl_opts = base_ydl_opts()
-
+    ydl_opts = {'quiet': True}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -102,26 +86,32 @@ def progress_hook(d):
 # ---------- DOWNLOAD FUNCTION ----------
 def download_media(url, selected_height, is_audio=False):
 
-    ydl_opts = base_ydl_opts()
-
     if is_audio:
-        # Cloud-safe audio (no ffmpeg conversion)
-        ydl_opts.update({
-            'format': 'bestaudio[ext=m4a]/bestaudio',
+        ydl_opts = {
+            'format': 'bestaudio/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }],
             'progress_hooks': [progress_hook]
-        })
+        }
+
     else:
-        # Cloud-safe video (no merging)
-        ydl_opts.update({
-            'format': f'best[height<={selected_height}][ext=mp4]',
+        ydl_opts = {
+            # 🔥 FIXED AUDIO + COMPATIBILITY
+            'format': f"bestvideo[height<={selected_height}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<={selected_height}]",
+            'merge_output_format': 'mp4',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
             'progress_hooks': [progress_hook]
-        })
+        }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
+
+        if is_audio:
+            filename = os.path.splitext(filename)[0] + ".mp3"
 
     return filename
 
@@ -134,21 +124,15 @@ if fetch_clicked:
             st.session_state.info = info
             st.session_state.formats = formats
 
-            # Thumbnail
+            # Thumbnail (with fallback)
             thumbnail = info.get('thumbnail')
+
             if thumbnail:
                 st.image(thumbnail)
             else:
-                st.warning("⚠️ Thumbnail not available")
+                st.warning("⚠️ Thumbnail not available for this platform")
 
             st.subheader(info.get('title', "No Title"))
-
-            # Extra info (pro touch)
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"👁 Views: {info.get('view_count', 'N/A')}")
-            with col2:
-                st.write(f"⏱ Duration: {round(info.get('duration', 0)/60, 2)} min")
 
             st.success("✅ Video info loaded!")
 
@@ -171,7 +155,7 @@ if st.session_state.formats:
     with col2:
         download_type = st.radio(
             "📦 Format",
-            ["🎬 Video (MP4)", "🎵 Audio"]
+            ["🎬 Video (MP4)", "🎵 Audio (MP3)"]
         )
 
     selected_height = st.session_state.formats[quality]
@@ -182,7 +166,7 @@ if st.session_state.formats:
     if st.button("⬇️ Download Now", use_container_width=True):
         with st.spinner("🚀 Processing your request..."):
             try:
-                is_audio = download_type == "🎵 Audio"
+                is_audio = download_type == "🎵 Audio (MP3)"
 
                 file_path = download_media(url, selected_height, is_audio)
 
@@ -202,6 +186,3 @@ if st.session_state.formats:
 # ---------- FOOTER ----------
 st.markdown("---")
 st.caption("⚡ Built with Streamlit | Multi-platform support | Hackathon Ready 🚀")
-
-# ---------- WARNING ----------
-st.info("⚠️ Note: Some platforms (like YouTube) may block downloads on cloud deployment. Works best locally.")
